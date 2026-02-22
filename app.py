@@ -3,6 +3,10 @@ from flask_cors import CORS
 import tinker
 import pandas as pd
 
+@app.route("/")
+def home():
+    return "Backend is running."
+
 app = Flask(__name__)
 CORS(app)
 
