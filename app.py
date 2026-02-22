@@ -1,43 +1,24 @@
 import os
-import pandas as pd
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import tinker
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Load API key securely from Render environment variables
 API_KEY = os.environ.get("TINKER_API_KEY")
 
-# Initialize Tinker client EXACTLY like your class example
 service_client = tinker.ServiceClient(api_key=API_KEY)
-
 model_name = "meta-llama/Llama-3.1-8B-Instruct"
 client = service_client.create_sampling_client(base_model=model_name)
 tokenizer = client.get_tokenizer()
 
-# Load CSV once at startup
-CSV_PATH = "clients.csv"
-if os.path.exists(CSV_PATH):
-    df = pd.read_csv(CSV_PATH)
-else:
-    df = None
 
-
-# Health check route
 @app.route("/")
 def home():
     return "Backend is running."
 
 
-# Serve CSV to frontend
-@app.route("/clients.csv")
-def get_csv():
-    return send_file(CSV_PATH)
-
-
-# Chat endpoint
 @app.route("/api/chat", methods=["POST"])
 def chat():
     try:
@@ -47,32 +28,22 @@ def chat():
         if not user_message:
             return jsonify({"error": "No message provided"}), 400
 
-        # Convert dataframe to string (limit size)
-        if df is not None:
-            small_df = df.head(20)[[
-                "Matter Digital Id",
-                "Current Residence State",
-                "Incident Date",
-                "Injury Type",
-                "Brand Of Products Used"
-            ]]
-            data_preview = small_df.to_csv(index=False)
-        else:
-            data_preview = "No client data loaded."
-
+        # SMALL, STATIC CONTEXT (no pandas, no CSV)
         prompt = f"""
 You are a data analysis assistant.
 
-Here is the client dataset:
-{data_preview}
+The dataset contains client injury cases with:
+- Client ID
+- State
+- Incident Date
+- Injury Type
+- Product Brand
 
 User question:
 {user_message}
 
-Provide a clear and concise answer based only on the dataset.
+Provide a concise analytical answer.
 """
-
-        # ----- TINKER LOGIC (MATCHES YOUR WORKING CLASS CODE) -----
 
         tokens = tokenizer.encode(prompt)
         model_input = tinker.types.ModelInput.from_ints(tokens)
@@ -81,8 +52,8 @@ Provide a clear and concise answer based only on the dataset.
             prompt=model_input,
             num_samples=1,
             sampling_params=tinker.types.SamplingParams(
-                max_tokens=300,
-                temperature=0.7
+                max_tokens=200,
+                temperature=0.5
             )
         ).result()
 
