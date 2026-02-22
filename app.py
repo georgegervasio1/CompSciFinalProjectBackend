@@ -2,20 +2,20 @@ import os
 import pandas as pd
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-
-# If using Tinker
 import tinker
 
 app = Flask(__name__)
 CORS(app)
 
-# Load API key securely
+# Load API key securely from Render environment variables
 API_KEY = os.environ.get("TINKER_API_KEY")
 
-# Initialize Tinker client
+# Initialize Tinker client EXACTLY like your class example
 service_client = tinker.ServiceClient(api_key=API_KEY)
+
 model_name = "meta-llama/Llama-3.1-8B-Instruct"
 client = service_client.create_sampling_client(base_model=model_name)
+tokenizer = client.get_tokenizer()
 
 # Load CSV once at startup
 CSV_PATH = "clients.csv"
@@ -25,7 +25,7 @@ else:
     df = None
 
 
-# Health check route (so you can test backend)
+# Health check route
 @app.route("/")
 def home():
     return "Backend is running."
@@ -47,7 +47,7 @@ def chat():
         if not user_message:
             return jsonify({"error": "No message provided"}), 400
 
-        # Convert dataframe to string (limit size to avoid huge prompt)
+        # Convert dataframe to string (limit size)
         if df is not None:
             data_preview = df.head(200).to_string()
         else:
@@ -65,10 +65,24 @@ User question:
 Provide a clear and concise answer based only on the dataset.
 """
 
-        result = client.sample(prompt)
-        response_text = result.text
+        # ----- TINKER LOGIC (MATCHES YOUR WORKING CLASS CODE) -----
 
-        return jsonify({"response": response_text})
+        tokens = tokenizer.encode(prompt)
+        model_input = tinker.types.ModelInput.from_ints(tokens)
+
+        result = client.sample(
+            prompt=model_input,
+            num_samples=1,
+            sampling_params=tinker.types.SamplingParams(
+                max_tokens=300,
+                temperature=0.7
+            )
+        ).result()
+
+        generated_tokens = result.sequences[0].tokens
+        generated_text = tokenizer.decode(generated_tokens)
+
+        return jsonify({"response": generated_text})
 
     except Exception as e:
         print("ERROR:", str(e))
