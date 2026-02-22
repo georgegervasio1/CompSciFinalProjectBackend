@@ -49,7 +49,14 @@ def chat():
 
         # Convert dataframe to string (limit size)
         if df is not None:
-            data_preview = df.head(200).to_string()
+            small_df = df.head(20)[[
+                "Matter Digital Id",
+                "Current Residence State",
+                "Incident Date",
+                "Injury Type",
+                "Brand Of Products Used"
+            ]]
+            data_preview = small_df.to_csv(index=False)
         else:
             data_preview = "No client data loaded."
 
