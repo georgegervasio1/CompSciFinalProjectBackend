@@ -65,7 +65,7 @@ User question:
 Provide a clear and concise answer based only on the dataset.
 """
 
-        result = client.complete(prompt)
+        result = client.sample(prompt)
         response_text = result.text
 
         return jsonify({"response": response_text})
