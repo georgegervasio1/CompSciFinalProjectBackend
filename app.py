@@ -97,8 +97,5 @@ def chat():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    print("🚀 Starting Flask server...")
-    print("📊 Loading client data...")
-    print("🤖 Tinker LLM ready")
-    print("\n💻 Open http://localhost:5000 in your browser\n")
-    app.run(debug=True, port=5000)
+    print("App.py working")
+    app.run(host='0.0.0.0', port=5000)
