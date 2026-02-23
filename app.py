@@ -1,18 +1,15 @@
 import os
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import tinker
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
 
 API_KEY = os.environ.get("TINKER_API_KEY")
 
-service_client = tinker.ServiceClient(api_key=API_KEY)
-model_name = "meta-llama/Llama-3.1-8B-Instruct"
-client = service_client.create_sampling_client(base_model=model_name)
-tokenizer = client.get_tokenizer()
-
+# CHANGE THIS to your real endpoint if different
+LLM_ENDPOINT = "https://api.together.xyz/v1/completions"
 
 @app.route("/")
 def home():
@@ -28,7 +25,6 @@ def chat():
         if not user_message:
             return jsonify({"error": "No message provided"}), 400
 
-        # SMALL, STATIC CONTEXT (no pandas, no CSV)
         prompt = f"""
 You are a data analysis assistant.
 
@@ -45,20 +41,23 @@ User question:
 Provide a concise analytical answer.
 """
 
-        tokens = tokenizer.encode(prompt)
-        model_input = tinker.types.ModelInput.from_ints(tokens)
+        headers = {
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json"
+        }
 
-        result = client.sample(
-            prompt=model_input,
-            num_samples=1,
-            sampling_params=tinker.types.SamplingParams(
-                max_tokens=200,
-                temperature=0.5
-            )
-        ).result()
+        payload = {
+            "model": "meta-llama/Llama-3.1-8B-Instruct",
+            "prompt": prompt,
+            "max_tokens": 200,
+            "temperature": 0.5
+        }
 
-        generated_tokens = result.sequences[0].tokens
-        generated_text = tokenizer.decode(generated_tokens)
+        response = requests.post(LLM_ENDPOINT, json=payload, headers=headers)
+
+        result = response.json()
+
+        generated_text = result["choices"][0]["text"]
 
         return jsonify({"response": generated_text})
 
