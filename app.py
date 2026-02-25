@@ -43,7 +43,9 @@ def chat():
             return jsonify({"error": "No message provided"}), 400
 
         prompt = f"""
-You are a data analysis assistant.
+        
+You are a legal data analysis assistant.
+
 
 The dataset contains client injury cases with:
 - Client ID
@@ -55,7 +57,13 @@ The dataset contains client injury cases with:
 User question:
 {user_message}
 
-Provide a concise analytical answer.
+Answer the question clearly and concisely.
+Do NOT show code.
+Do NOT show methodology.
+Do NOT use markdown.
+Do NOT explain your reasoning.
+Return only a clean final answer written as a normal paragraph. 
+
 """
 
         # Encode prompt
