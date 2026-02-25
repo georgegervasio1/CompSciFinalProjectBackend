@@ -47,6 +47,7 @@ def chat():
 You are a legal data analysis assistant.
 
 Respond with only the direct answer.
+When you are finished write: "END"
 No repetition.
 
 The dataset contains client injury cases with:
@@ -80,7 +81,7 @@ ANSWER:
             sampling_params=tinker.types.SamplingParams(
                 max_tokens=200,
                 temperature=0.3,
-                stop= ["USER QUESTION:","SYSTEM","Will you assist"]
+                stop= ["\n\n", "Question:", "USER", "SYSTEM","Will you assist","END"]
             )
         ).result()
 
