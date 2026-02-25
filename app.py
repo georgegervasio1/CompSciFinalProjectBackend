@@ -1,21 +1,38 @@
 import os
-import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+import tinker
 
 app = Flask(__name__)
 CORS(app)
 
+# Load API key from environment variable
 API_KEY = os.environ.get("TINKER_API_KEY")
 
-# CHANGE THIS to your real endpoint if different
-LLM_ENDPOINT = "https://api.together.xyz/v1/completions"
+# Initialize Tinker client
+service_client = tinker.ServiceClient(api_key=API_KEY)
 
+model_name = "meta-llama/Llama-3.1-8B-Instruct"
+client = service_client.create_sampling_client(base_model=model_name)
+tokenizer = client.get_tokenizer()
+
+
+# Root health check
 @app.route("/")
 def home():
     return "Backend is running."
 
 
+# Serve clients.csv
+@app.route("/clients.csv")
+def get_clients():
+    try:
+        return send_file("clients.csv")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# Chat endpoint
 @app.route("/api/chat", methods=["POST"])
 def chat():
     try:
@@ -41,23 +58,22 @@ User question:
 Provide a concise analytical answer.
 """
 
-        headers = {
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json"
-        }
+        # Encode prompt
+        tokens = tokenizer.encode(prompt)
+        model_input = tinker.types.ModelInput.from_ints(tokens)
 
-        payload = {
-            "model": "meta-llama/Llama-3.1-8B-Instruct",
-            "prompt": prompt,
-            "max_tokens": 200,
-            "temperature": 0.5
-        }
+        # Call model (EXACT working pattern from class)
+        result = client.sample(
+            prompt=model_input,
+            num_samples=1,
+            sampling_params=tinker.types.SamplingParams(
+                max_tokens=200,
+                temperature=0.5
+            )
+        ).result()
 
-        response = requests.post(LLM_ENDPOINT, json=payload, headers=headers)
-
-        result = response.json()
-
-        generated_text = result["choices"][0]["text"]
+        generated_tokens = result.sequences[0].tokens
+        generated_text = tokenizer.decode(generated_tokens)
 
         return jsonify({"response": generated_text})
 
