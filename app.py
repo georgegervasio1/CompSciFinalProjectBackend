@@ -1,43 +1,34 @@
 import os
-import pandas as pd
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-from openai import OpenAI
+import tinker
 
 app = Flask(__name__)
 CORS(app)
 
-# Load OpenAI API key from environment variable
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+# Load API key from environment variable
+API_KEY = os.environ.get("TINKER_API_KEY")
 
-# Initialize OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Initialize Tinker client
+service_client = tinker.ServiceClient(api_key=API_KEY)
+
+model_name = "meta-llama/Llama-3.1-8B-Instruct"
+client = service_client.create_sampling_client(base_model=model_name)
+tokenizer = client.get_tokenizer()
 
 
-# Health check route
+# Root health check
 @app.route("/")
 def home():
     return "Backend is running."
 
 
-# Proper CSV API route (BEST PRACTICE)
-@app.route("/api/clients")
+# Serve clients.csv
+@app.route("/clients.csv")
 def get_clients():
     try:
-        df = pd.read_csv("clients.csv")
-        return jsonify(df.to_dict(orient="records"))
+        return send_file("clients.csv")
     except Exception as e:
-        print("CSV ERROR:", str(e))
-        return jsonify({"error": str(e)}), 500
-
-
-# Optional: serve raw CSV if you still want it accessible
-@app.route("/clients.csv")
-def serve_csv():
-    try:
-        return send_from_directory(os.getcwd(), "clients.csv")
-    except Exception as e:
-        print("FILE ERROR:", str(e))
         return jsonify({"error": str(e)}), 500
 
 
@@ -67,22 +58,27 @@ User question:
 Provide a concise analytical answer.
 """
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful data analyst."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=200,
-            temperature=0.5
-        )
+        # Encode prompt
+        tokens = tokenizer.encode(prompt)
+        model_input = tinker.types.ModelInput.from_ints(tokens)
 
-        answer = response.choices[0].message.content
+        # Call model (EXACT working pattern from class)
+        result = client.sample(
+            prompt=model_input,
+            num_samples=1,
+            sampling_params=tinker.types.SamplingParams(
+                max_tokens=200,
+                temperature=0.5
+            )
+        ).result()
 
-        return jsonify({"response": answer})
+        generated_tokens = result.sequences[0].tokens
+        generated_text = tokenizer.decode(generated_tokens)
+
+        return jsonify({"response": generated_text})
 
     except Exception as e:
-        print("CHAT ERROR:", str(e))
+        print("ERROR:", str(e))
         return jsonify({"error": str(e)}), 500
 
 
