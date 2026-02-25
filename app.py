@@ -46,9 +46,7 @@ def chat():
         
 You are a legal data analysis assistant.
 
-Respond with only the direct answer.
-When you are finished write: "END"
-No repetition.
+When you are finished write: "Message End"
 
 The dataset contains client injury cases with:
 - Client ID
@@ -66,6 +64,7 @@ Do NOT show methodology.
 Do NOT use markdown.
 Do NOT explain your reasoning.
 Return only a clean final answer written as a normal paragraph. 
+Expand only when necessary
 
 ANSWER:
 """
@@ -81,7 +80,7 @@ ANSWER:
             sampling_params=tinker.types.SamplingParams(
                 max_tokens=200,
                 temperature=0.3,
-                stop= ["\n\n", "Question:", "USER", "SYSTEM","Will you assist","END"]
+                stop= ["\n\n", "Question:", "USER", "SYSTEM","Will you assist","Message End"]
             )
         ).result()
 
