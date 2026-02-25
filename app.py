@@ -79,7 +79,7 @@ ANSWER:
             num_samples=1,
             sampling_params=tinker.types.SamplingParams(
                 max_tokens=200,
-                temperature=0.3
+                temperature=0.3,
                 stop= ["USER QUESTION:","SYSTEM","Will you assist"]
             )
         ).result()
