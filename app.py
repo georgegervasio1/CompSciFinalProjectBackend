@@ -11,10 +11,18 @@ app = Flask(__name__)
 CORS(app)
 
 API_KEY = os.environ.get("TINKER_API_KEY")
-service_client = tinker.ServiceClient(api_key=API_KEY)
 model_name = "meta-llama/Llama-3.1-8B-Instruct"
-client = service_client.create_sampling_client(base_model=model_name)
-tokenizer = client.get_tokenizer()
+
+try:
+    service_client = tinker.ServiceClient(api_key=API_KEY)
+    client = service_client.create_sampling_client(base_model=model_name)
+    tokenizer = client.get_tokenizer()
+    TINKER_READY = True
+except Exception as e:
+    print(f"WARNING: Tinker failed to initialize: {e}")
+    client = None
+    tokenizer = None
+    TINKER_READY = False
 
 # In-memory matter storage: { matter_name: [records] }
 matters = {}
@@ -22,6 +30,8 @@ matters = {}
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 def run_llama(prompt, max_tokens=400, temperature=0.3, extra_stop=None, allow_paragraphs=False):
+    if not TINKER_READY:
+        raise RuntimeError("Tinker AI is not initialized. Check TINKER_API_KEY.")
     stop_sequences = ["Question:", "USER", "SYSTEM", "Will you assist", "Message End"]
     if not allow_paragraphs:
         stop_sequences.insert(0, "\n\n")
