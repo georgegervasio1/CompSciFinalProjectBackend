@@ -29,14 +29,47 @@ matters = {}
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
-def run_llama(prompt, max_tokens=400, temperature=0.3, extra_stop=None, allow_paragraphs=False):
+def trim_to_sentence(text):
+    """
+    Trim text to end at the last complete sentence.
+    Prevents mid-sentence cutoffs when the model runs out of tokens.
+    """
+    if not text:
+        return ""
+    text = text.strip()
+    # Already ends cleanly
+    if text and text[-1] in ".!?":
+        return text
+    # Walk backwards to find the last sentence-ending punctuation
+    for i in range(len(text) - 1, max(len(text) // 4, 0), -1):
+        if text[i] in ".!?" and (i == len(text) - 1 or text[i + 1] in " \n\t\"'"):
+            return text[: i + 1].strip()
+    # No clean sentence boundary found — return as-is
+    return text
+
+
+def run_llama(prompt, max_tokens=400, temperature=0.3,
+              extra_stop=None, allow_paragraphs=False,
+              single_line=False, trim_sentences=True):
+    """
+    Call the Llama model.
+    - allow_paragraphs : when True, removes \n\n from stop sequences
+    - single_line      : when True, stops on any newline (good for one-liners)
+    - trim_sentences   : when True, trims response to last complete sentence
+    """
     if not TINKER_READY:
         raise RuntimeError("Tinker AI is not initialized. Check TINKER_API_KEY.")
+
     stop_sequences = ["Question:", "USER", "SYSTEM", "Will you assist", "Message End"]
-    if not allow_paragraphs:
+
+    if single_line:
+        stop_sequences.insert(0, "\n")
+    elif not allow_paragraphs:
         stop_sequences.insert(0, "\n\n")
+
     if extra_stop:
         stop_sequences.extend(extra_stop)
+
     tokens = tokenizer.encode(prompt)
     model_input = tinker.types.ModelInput.from_ints(tokens)
     result = client.sample(
@@ -48,22 +81,61 @@ def run_llama(prompt, max_tokens=400, temperature=0.3, extra_stop=None, allow_pa
             stop=stop_sequences
         )
     ).result()
-    return tokenizer.decode(result.sequences[0].tokens)
+    output = tokenizer.decode(result.sequences[0].tokens)
+
+    if trim_sentences:
+        output = trim_to_sentence(output)
+
+    return output
 
 
 def classify_severity(c):
-    """Classify a client's severity level based on key fields."""
-    death = str(c.get("death", "")).strip().lower() in ("yes", "true", "1", "deceased", "death", "y")
-    disability = str(c.get("disability", "")).strip().lower() in ("yes", "true", "1", "y")
-    hospitalized = str(c.get("hospitalized", "")).strip().lower() in ("yes", "true", "1", "y")
-    if death:
+    """
+    Classify severity from the actual CSV Injury Type field.
+    Reads 'injury_type' (from Injury Type column) and 'alive_deceased'
+    (from Alive Or Deceased column), with legacy field fallbacks.
+    """
+    injury_type = str(
+        c.get("injury_type") or c.get("injury") or ""
+    ).lower()
+    alive_deceased = str(c.get("alive_deceased") or c.get("death") or "").lower()
+
+    # --- TIER 1 — Catastrophic -------------------------------------------
+    # Death, Cardiac Arrest, or explicitly catastrophic injury labels
+    if "deceased" in alive_deceased:
         return "catastrophic"
-    elif disability:
+    if any(kw in injury_type for kw in [
+        "catastrophic physical injury",   # catches Paralysis + Spinal Cord
+        "cardiovascular event - cardiac arrest",
+    ]):
+        return "catastrophic"
+
+    # --- TIER 2 — Severe -------------------------------------------------
+    # Stroke, permanent nerve damage/neuropathy, severe burns, spinal paralysis
+    if any(kw in injury_type for kw in [
+        "neurological event - stroke",
+        "severeburns",                    # severeBurns-PermanentDisfigurement…
+        "permanent disfigurement",
+        "permanent / long term",          # catches all Permanent/Long Term subtypes
+        "paralysis involving the spinal", # Severe Neurological Injury - Paralysis…
+        "permanent bone spur",
+        "b-12 and/or b-12 production",
+        "muscle atrophy",
+        "liver toxicity",
+    ]):
         return "severe"
-    elif hospitalized:
+
+    # --- TIER 3 — Moderate-High ------------------------------------------
+    # Seizures, acute hospitalization, arrhythmia
+    if any(kw in injury_type for kw in [
+        "neurological event - seizure",
+        "other- severe injury requiring hospitalization",
+        "cardiovascular event - arrhythmia",
+    ]):
         return "moderate_high"
-    else:
-        return "moderate"
+
+    # --- TIER 4 — Moderate -----------------------------------------------
+    return "moderate"
 
 
 SEVERITY_RANGES = {
@@ -120,18 +192,22 @@ def chat():
             return jsonify({"error": "No message provided"}), 400
 
         prompt = f"""You are a legal data analysis assistant. Use only projected, estimated, and forecasted language. Never say "final settlement", "guaranteed", or "will receive". Always say "projected", "estimated", or "forecasted".
-When you are finished write: "Message End"
-The dataset contains client injury cases with:
-- Client ID, State, Incident Date, Injury Type, Product Brand
+The dataset contains mass tort client injury cases with fields including Client ID, State, Incident Date, Injury Type, and Product Brand.
 
-User question:
-{user_message}
+User question: {user_message}
 
-Answer clearly and concisely.
-Do NOT show code. Do NOT use markdown. Return only a clean final answer as a normal paragraph.
-ANSWER:
-"""
-        return jsonify({"response": run_llama(prompt, max_tokens=200)})
+Instructions:
+- Answer in 2-4 complete sentences.
+- Do NOT use markdown, bullet points, or headers.
+- End your response with a period. Do not trail off mid-sentence.
+ANSWER:"""
+        return jsonify({"response": run_llama(
+            prompt,
+            max_tokens=350,
+            temperature=0.3,
+            allow_paragraphs=True,
+            trim_sentences=True,
+        )})
 
     except Exception as e:
         print("CHAT ERROR:", str(e))
@@ -426,9 +502,17 @@ Rewrite this into a single, improved question that is more specific, data-driven
 Return ONLY the improved question. No explanation. No preamble. No quotes. Just the question.
 IMPROVED QUESTION:
 """
-        refined = run_llama(prompt, max_tokens=80, temperature=0.4,
-                            extra_stop=["Original:", "User:", "\n"])
-        refined = refined.strip().strip('"').strip("'")
+        # single_line=True stops at the first newline so we get exactly one question.
+        # 160 tokens is enough for a detailed analytical question without truncation.
+        refined = run_llama(
+            prompt,
+            max_tokens=160,
+            temperature=0.35,
+            single_line=True,
+            trim_sentences=False,   # questions don't always end with .
+            extra_stop=["Original:", "User:"],
+        )
+        refined = refined.strip().strip('"').strip("'").rstrip("?") + "?"
         return jsonify({"refined": refined})
 
     except Exception as e:
