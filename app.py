@@ -29,22 +29,54 @@ matters = {}
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
+# Phrases that indicate the model has started adding meta-commentary
+# rather than answering the question. Trim everything from these onwards.
+_META_STOP_PHRASES = [
+    "note:", "also note", "also, note", "please note",
+    "the above response", "the above answer", "the actual answer",
+    "this response is", "this is in line", "important note",
+    "disclaimer:", "caveat:", "the response is written",
+    "note that the response", "based on the above",
+]
+
 def trim_to_sentence(text):
-    """
-    Trim text to end at the last complete sentence.
-    Prevents mid-sentence cutoffs when the model runs out of tokens.
-    """
+    """Trim to last complete sentence and strip model meta-commentary."""
     if not text:
         return ""
     text = text.strip()
-    # Already ends cleanly
+
+    # ── 1. Strip anything after known meta-commentary markers ──────────────
+    lower = text.lower()
+    for phrase in _META_STOP_PHRASES:
+        idx = lower.find(phrase)
+        if idx != -1:
+            text = text[:idx].strip()
+            lower = text.lower()
+
+    # ── 2. Remove duplicate sentences ──────────────────────────────────────
+    import re
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    seen = []
+    for s in sentences:
+        normalized = re.sub(r'\s+', ' ', s.strip().lower())
+        if normalized and normalized not in seen:
+            seen.append(normalized)
+    # Rebuild from deduplicated originals (preserve original case/spacing)
+    unique_sentences = []
+    used = set()
+    for s in sentences:
+        key = re.sub(r'\s+', ' ', s.strip().lower())
+        if key and key not in used:
+            used.add(key)
+            unique_sentences.append(s.strip())
+    text = " ".join(unique_sentences).strip()
+
+    # ── 3. Trim to last complete sentence ──────────────────────────────────
     if text and text[-1] in ".!?":
         return text
-    # Walk backwards to find the last sentence-ending punctuation
     for i in range(len(text) - 1, max(len(text) // 4, 0), -1):
         if text[i] in ".!?" and (i == len(text) - 1 or text[i + 1] in " \n\t\"'"):
             return text[: i + 1].strip()
-    # No clean sentence boundary found — return as-is
     return text
 
 
@@ -191,22 +223,29 @@ def chat():
         if not user_message:
             return jsonify({"error": "No message provided"}), 400
 
-        prompt = f"""You are a legal data analysis assistant. Use only projected, estimated, and forecasted language. Never say "final settlement", "guaranteed", or "will receive". Always say "projected", "estimated", or "forecasted".
-The dataset contains mass tort client injury cases with fields including Client ID, State, Incident Date, Injury Type, and Product Brand.
+        prompt = f"""You are a concise legal data analysis assistant. Answer the question below in 2-3 sentences only. Stop writing immediately after your third sentence. Do not repeat yourself. Do not add notes, caveats, disclaimers, or commentary after your answer.
 
-User question: {user_message}
+Rules:
+- Use only projected, estimated, or forecasted language.
+- Never say "guaranteed", "final settlement", or "will receive".
+- No bullet points, markdown, or headers.
+- 2-3 sentences maximum. Then stop.
 
-Instructions:
-- Answer in 2-4 complete sentences.
-- Do NOT use markdown, bullet points, or headers.
-- End your response with a period. Do not trail off mid-sentence.
-ANSWER:"""
+Question: {user_message}
+
+Answer:"""
+        _META_EXTRA = [
+            "Note:", "Also note", "Also, note", "Please note",
+            "The above", "Important:", "Disclaimer:",
+            "This response", "The response",
+        ]
         return jsonify({"response": run_llama(
             prompt,
-            max_tokens=350,
-            temperature=0.3,
-            allow_paragraphs=True,
+            max_tokens=160,
+            temperature=0.25,
+            allow_paragraphs=False,
             trim_sentences=True,
+            extra_stop=_META_EXTRA,
         )})
 
     except Exception as e:
